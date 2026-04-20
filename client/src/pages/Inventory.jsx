@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Package, Plus, AlertCircle, RefreshCcw, Edit, Save, X, ArrowUp, ArrowDown, BarChart3, Calendar } from 'lucide-react';
+import API_BASE_URL from '../config';
 
 const Inventory = () => {
     const [stock, setStock] = useState([]);
@@ -25,8 +26,9 @@ const Inventory = () => {
 
     const loadData = async () => {
         try {
-            const inv = await axios.get('http://localhost:5000/api/inventory');
-            const audit = await axios.get('http://localhost:5000/api/inventory/audit-report');
+            // Corrected with backticks and assigned to variable 'inv'
+            const inv = await axios.get(`${API_BASE_URL}/api/inventory`);
+            const audit = await axios.get(`${API_BASE_URL}/api/inventory/audit-report`);
             
             // Process the data for smart display logic
             const processedStock = inv.data.map(item => {
@@ -72,7 +74,7 @@ const Inventory = () => {
     const handleAddProduct = async (e) => {
         e.preventDefault();
         try {
-            await axios.post('http://localhost:5000/api/inventory/add-new', newItem);
+            await axios.post(`${API_BASE_URL}/api/inventory/add-new`, newItem);
             setShowAddModal(false);
             loadData();
         } catch (err) { alert("Error adding product"); }
@@ -80,7 +82,7 @@ const Inventory = () => {
 
     const handleQuickUpdate = async (id) => {
         try {
-            await axios.post('http://localhost:5000/api/inventory/add-stock', { 
+            await axios.post(`${API_BASE_URL}/api/inventory/add-stock`, { 
                 item_id: id, 
                 quantity_to_add: updateAmount.val 
             });
@@ -187,12 +189,9 @@ const Inventory = () => {
                                         <strong>{item.item_name}</strong>
                                         {isMismatched && <span style={{color: '#e63946', fontSize: '10px', display: 'block'}}>⚠️ Stock Discrepancy</span>}
                                     </td>
-                                    
-                                    {/* These are the columns that were missing */}
                                     <td style={{ color: '#666' }}>{item.displayOpening}</td>
                                     <td style={{ color: '#2a9d8f' }}>+{item.added_stock}</td>
                                     <td style={{ color: '#e63946' }}>-{item.units_sold}</td>
-                                    
                                     <td style={{ fontWeight: '800', fontSize: '1.1rem', color: (isLow || isMismatched) ? '#e63946' : '#2a9d8f' }}>
                                         {item.displayStock}
                                         {isMismatched && (
@@ -201,7 +200,6 @@ const Inventory = () => {
                                             </span>
                                         )}
                                     </td>
-
                                     <td>
                                         <span className={`stock-badge ${ (isLow || isMismatched) ? 'stock-low' : 'stock-healthy'}`}>
                                             {isMismatched ? 'Check Usage' : isLow ? 'Low Stock' : 'Optimal'}

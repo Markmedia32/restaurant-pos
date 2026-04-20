@@ -4,6 +4,7 @@ import {
   BarChart3, Calendar, Download, Wallet, Receipt, 
   MinusCircle, Plus, PieChart 
 } from 'lucide-react';
+import API_BASE_URL from '../config'; // Add this at the top
 
 const Sales = () => {
   const [reportData, setReportData] = useState([]);
@@ -21,12 +22,12 @@ const Sales = () => {
       setLoading(true);
       try {
         // 1. Fetch Daily Itemized Sales
-        const dailyRes = await axios.get(`http://localhost:5000/api/reports/sales-summary?date=${selectedDate}`);
+        const dailyRes = await axios.get(`${API_BASE_URL}/api/reports/sales-summary?date=${selectedDate}`);
         setReportData(dailyRes.data);
 
         // 2. Fetch Monthly Cumulative Revenue (Formatted for YYYY-MM)
         const monthYear = selectedDate.substring(0, 7); 
-        const monthRes = await axios.get(`http://localhost:5000/api/reports/monthly-cumulative?month=${monthYear}`);
+        const monthRes = await axios.get(`${API_BASE_URL}/api/reports/monthly-cumulative?month=${monthYear}`);
 
         if (monthRes.data && monthRes.data.total_revenue !== undefined) {
             // Ensure we are working with a clean number and ignoring pending/cancelled

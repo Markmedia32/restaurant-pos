@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { ShoppingCart, Smartphone, Trash2, Plus, Minus, Search, Banknote, X, Printer } from 'lucide-react';
+import API_BASE_URL from '../config'; // Add this at the top
 
 const Pos = () => {
   const [menuItems, setMenuItems] = useState([]);
@@ -15,7 +16,7 @@ const Pos = () => {
   useEffect(() => {
     const fetchMenu = async () => {
       try {
-        const res = await axios.get('http://localhost:5000/api/menu');
+       const res = await axios.get(`${API_BASE_URL}/api/menu`);
         setMenuItems(res.data);
       } catch (err) {
         console.error("Error fetching menu:", err);
@@ -51,7 +52,7 @@ const Pos = () => {
   const startPolling = (checkoutID, orderData) => {
     const interval = setInterval(async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/api/check-payment/${checkoutID}`);
+        const res = await axios.get(`${API_BASE_URL}/api/check-payment/${checkoutID}`);
         
         if (res.data.status === 'Completed') {
           clearInterval(interval);
@@ -100,7 +101,7 @@ const Pos = () => {
     };
 
     try {
-      const res = await axios.post('http://localhost:5000/api/pay/stk', {
+      const res = await axios.post(`${API_BASE_URL}/api/pay/stk`, {
         amount: total,
         phone: phoneNumber,
         clientName: orderSnapshot.client,
@@ -119,7 +120,7 @@ const Pos = () => {
     if (cart.length === 0) return alert("Cart is empty");
     setLoading(true);
     try {
-      await axios.post('http://localhost:5000/api/pay/cash', {
+      const res = await axios.post('http://localhost:5000/api/pay/cash', {
         amount: total,
         clientName: clientName || "Guest Customer",
         items: cart 
