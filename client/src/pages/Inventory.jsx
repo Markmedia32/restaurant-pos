@@ -26,19 +26,18 @@ const Inventory = () => {
 
     const loadData = async () => {
         try {
-            // Corrected with backticks and assigned to variable 'inv'
             const inv = await axios.get(`${API_BASE_URL}/api/inventory`);
             const audit = await axios.get(`${API_BASE_URL}/api/inventory/audit-report`);
             
-            // Process the data for smart display logic
             const processedStock = inv.data.map(item => {
-                // Extract number from "2kg Packet" -> 2
-                const weightMatch = item.unit_measure.match(/(\d+)/);
+                // Regex safety for unit measure extraction
+                const weightMatch = item.unit_measure ? item.unit_measure.match(/(\d+)/) : null;
                 const unitWeight = weightMatch ? parseInt(weightMatch[0]) : 1;
                 
-                const opening = parseFloat(item.opening_stock) || 0;
-                const added = parseFloat(item.added_stock) || 0;
-                const sold = parseFloat(item.units_sold) || 0;
+                // PostgreSQL/Neon safety: Force numeric strings to actual Numbers
+                const opening = Number(item.opening_stock) || 0;
+                const added = Number(item.added_stock) || 0;
+                const sold = Number(item.units_sold) || 0;
                 
                 // Calculate closing balance in units
                 const closingUnits = opening + added - sold;
@@ -59,13 +58,13 @@ const Inventory = () => {
                     ...item, 
                     displayStock, 
                     displayOpening,
-                    units_sold: Math.ceil(sold), // Round up to show whole units sold
+                    units_sold: Math.ceil(sold), 
                     stock_quantity: closingUnits 
                 };
             });
 
             setStock(processedStock);
-            setAuditMessages(audit.data);
+            setAuditMessages(audit.data || []);
         } catch (err) {
             console.error("Fetch error", err);
         }
@@ -124,7 +123,7 @@ const Inventory = () => {
                         <div>
                             <h4 style={{ margin: 0, fontSize: '14px', color: '#666' }}>Total Restocks</h4>
                             <p style={{ margin: 0, fontSize: '22px', fontWeight: '800', color: '#2a9d8f' }}>
-                                {stock.reduce((acc, curr) => acc + (parseFloat(curr.added_stock) || 0), 0)}
+                                {stock.reduce((acc, curr) => acc + (Number(curr.added_stock) || 0), 0)}
                             </p>
                         </div>
                     </div>
@@ -135,7 +134,7 @@ const Inventory = () => {
                         <div>
                             <h4 style={{ margin: 0, fontSize: '14px', color: '#666' }}>Units Sold (Live)</h4>
                             <p style={{ margin: 0, fontSize: '22px', fontWeight: '800', color: '#e63946' }}>
-                                {stock.reduce((acc, curr) => acc + (curr.units_sold || 0), 0)}
+                                {stock.reduce((acc, curr) => acc + (Number(curr.units_sold) || 0), 0)}
                             </p>
                         </div>
                     </div>
@@ -148,7 +147,7 @@ const Inventory = () => {
                 <div className="recon-grid">
                     {auditMessages.map((msg, i) => {
                         const itemStock = stock.find(s => s.item_name === msg.item);
-                        const hasVariance = itemStock && parseFloat(itemStock.stock_quantity) !== parseFloat(msg.shouldBe);
+                        const hasVariance = itemStock && Number(itemStock.stock_quantity) !== Number(msg.shouldBe);
 
                         return (
                             <div key={i} className={`audit-card ${hasVariance ? 'variance-warning' : ''}`}>
@@ -180,7 +179,7 @@ const Inventory = () => {
                     <tbody>
                         {stock.map((item) => {
                             const itemAudit = auditMessages.find(a => a.item === item.item_name);
-                            const isMismatched = itemAudit && parseFloat(item.stock_quantity) !== parseFloat(itemAudit.shouldBe);
+                            const isMismatched = itemAudit && Number(item.stock_quantity) !== Number(itemAudit.shouldBe);
                             const isLow = item.stock_quantity < 5;
 
                             return (

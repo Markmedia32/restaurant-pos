@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { ShoppingCart, Smartphone, Trash2, Plus, Minus, Search, Banknote, X, Printer } from 'lucide-react';
-import API_BASE_URL from '../config'; // Add this at the top
+import API_BASE_URL from '../config'; 
 
 const Pos = () => {
   const [menuItems, setMenuItems] = useState([]);
@@ -16,8 +16,9 @@ const Pos = () => {
   useEffect(() => {
     const fetchMenu = async () => {
       try {
-       const res = await axios.get(`${API_BASE_URL}/api/menu`);
-        setMenuItems(res.data);
+        const res = await axios.get(`${API_BASE_URL}/api/menu`);
+        // Ensure res.data exists before setting state
+        setMenuItems(res.data || []);
       } catch (err) {
         console.error("Error fetching menu:", err);
       }
@@ -46,7 +47,8 @@ const Pos = () => {
 
   const removeFromCart = (id) => setCart(cart.filter(item => item.id !== id));
 
-  const total = cart.reduce((acc, item) => acc + (parseFloat(item.price) * item.qty), 0);
+  // Neon (Postgres) might return price as a string, parseFloat ensures math works
+  const total = cart.reduce((acc, item) => acc + (parseFloat(item.price || 0) * item.qty), 0);
 
   // ✅ POLLING LOGIC
   const startPolling = (checkoutID, orderData) => {
@@ -68,7 +70,6 @@ const Pos = () => {
           setPhoneNumber('');
           setClientName('');
         } else if (res.data.status === 'Failed') {
-          // New: Catch if the callback marks it as failed (like the timeout error)
           clearInterval(interval);
           setLoading(false);
           alert("Payment Failed or Timed Out. Please try again.");
@@ -93,7 +94,6 @@ const Pos = () => {
 
     setLoading(true);
     
-    // Capture current cart state for the receipt later
     const orderSnapshot = {
         total: total,
         client: clientName || "Guest Customer",
@@ -120,7 +120,8 @@ const Pos = () => {
     if (cart.length === 0) return alert("Cart is empty");
     setLoading(true);
     try {
-      const res = await axios.post('http://localhost:5000/api/pay/cash', {
+      // FIXED: Changed from localhost:5000 to API_BASE_URL for Render deployment
+      const res = await axios.post(`${API_BASE_URL}/api/pay/cash`, {
         amount: total,
         clientName: clientName || "Guest Customer",
         items: cart 
@@ -137,7 +138,7 @@ const Pos = () => {
   };
 
   const filteredMenu = menuItems.filter(item => 
-    item.product_name.toLowerCase().includes(searchTerm.toLowerCase())
+    (item.product_name || "").toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
