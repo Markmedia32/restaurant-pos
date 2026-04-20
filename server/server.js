@@ -78,26 +78,37 @@ const generateToken = async (req, res, next) => {
 
 // --- ROUTES ---
 
-// 1. Auth
-app.post('/api/login', (req, res) => {
+// 1. Auth (Updated for Neon/Postgres)
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
+    
+    // Postgres uses $1, $2 instead of ? 
     const sql = `
         SELECT users.id, users.username, roles.role_name 
         FROM users 
         JOIN roles ON users.role_id = roles.id 
-        WHERE users.username = ? AND users.password = ?
+        WHERE users.username = $1 AND users.password = $2
     `;
-    db.query(sql, [username, password], (err, results) => {
-        if (err) return res.status(500).json({ success: false });
-        if (results.length > 0) {
+
+    try {
+        const results = await pool.query(sql, [username, password]);
+        
+        if (results.rows.length > 0) {
             res.json({
                 success: true,
-                user: { id: results[0].id, username: results[0].username, role: results[0].role_name }
+                user: { 
+                    id: results.rows[0].id, 
+                    username: results.rows[0].username, 
+                    role: results.rows[0].role_name 
+                }
             });
         } else {
-            res.status(401).json({ success: false });
+            res.status(401).json({ success: false, message: "Invalid credentials" });
         }
-    });
+    } catch (err) {
+        console.error("Login Error:", err);
+        res.status(500).json({ success: false, error: "Database connection failed" });
+    }
 });
 
 // Get all users and their roles (Admin Only)
