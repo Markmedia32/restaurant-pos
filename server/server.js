@@ -1,6 +1,5 @@
 const express = require('express');
 const { Pool } = require('pg');
-const mysql = require('mysql2');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
@@ -14,27 +13,8 @@ app.use(cors());
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Database Connection
-const db = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'first_class_logistics',
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
 
-// Test Database Connection
-db.getConnection((err, connection) => {
-    if (err) {
-        console.error('Error connecting to MySQL:', err.message);
-    } else {
-        console.log('Connected to First Class Logistics Database successfully.');
-        connection.release();
-    }
-});
+
 
 // ================= NEON POSTGRES CONNECTION =================
 const pool = new Pool({
@@ -125,7 +105,7 @@ app.get('/api/admin/users', (req, res) => {
         FROM users 
         JOIN roles ON users.role_id = roles.id
     `;
-    db.query(sql, (err, results) => {
+    pool.query(sql, (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
@@ -149,7 +129,7 @@ app.post('/api/admin/create-user', (req, res) => {
     const { username, password, role_id } = req.body;
     const sql = "INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)";
     
-    db.query(sql, [username, password, role_id], (err, result) => {
+    pool.query(sql, [username, password, role_id], (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true, message: "User created!" });
     });
@@ -163,7 +143,7 @@ app.put('/api/admin/reset-password', (req, res) => {
     if (role !== 'Admin') return res.status(403).json("Unauthorized");
 
     const sql = "UPDATE users SET password = ? WHERE id = ?";
-    db.query(sql, [newPassword, userId], (err, result) => {
+    pool.query(sql, [newPassword, userId], (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true, message: "Password updated" });
     });
@@ -177,18 +157,33 @@ app.delete('/api/admin/delete-user/:id', (req, res) => {
     if (role !== 'Admin') return res.status(403).json("Unauthorized");
 
     const sql = "DELETE FROM users WHERE id = ?";
-    db.query(sql, [userId], (err, result) => {
+    pool.query(sql, [userId], (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true, message: "User removed" });
     });
 });
 
 // 2. Menu
-app.get('/api/menu', (req, res) => {
-    db.query("SELECT * FROM menu_items", (err, results) => {
-        if (err) return res.status(500).json(err);
-        res.json(results);
-    });
+app.get('/api/menu', async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM menu_items");
+        res.json(result.rows);
+    } catch (err) {
+        console.error("Menu Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/sales', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT * FROM sales ORDER BY sale_date DESC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        console.error("Sales Error:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // 3. MPESA
@@ -224,7 +219,7 @@ app.post('/api/pay/stk', generateToken, async (req, res) => {
 
         const sql = `INSERT INTO sales (client_name, total_price, payment_status, mpesa_checkout_id, sale_date) VALUES (?, ?, 'Pending', ?, NOW())`;
 
-        db.query(sql, [clientName, amount, data.CheckoutRequestID], (err, result) => {
+        pool.query(sql, [clientName, amount, data.CheckoutRequestID], (err, result) => {
             if (err) {
                 console.error("DB Insert Error:", err);
                 return;
@@ -240,7 +235,7 @@ app.post('/api/pay/stk', generateToken, async (req, res) => {
 
             const itemSql = `INSERT INTO sales_items (sale_id, product_name, qty, price) VALUES ?`;
 
-            db.query(itemSql, [itemValues], (itemErr) => {
+            pool.query(itemSql, [itemValues], (itemErr) => {
                 if (itemErr) console.error("Item Insert Error:", itemErr);
                 else console.log("Items inserted OK for sale:", saleId);
             });
@@ -259,7 +254,7 @@ app.get('/api/check-payment/:checkoutID', (req, res) => {
     const { checkoutID } = req.params;
     const sql = "SELECT payment_status FROM sales WHERE mpesa_checkout_id = ?";
     
-    db.query(sql, [checkoutID], (err, results) => {
+    pool.query(sql, [checkoutID], (err, results) => {
         if (err) {
             console.error("Status Check Error:", err);
             return res.status(500).json({ error: "Database error" });
@@ -272,37 +267,32 @@ app.get('/api/check-payment/:checkoutID', (req, res) => {
 });
 
 // ✅ RESTORED CASH ROUTE
-app.post('/api/pay/cash', (req, res) => {
+app.post('/api/pay/cash', async (req, res) => {
     const { clientName, amount, items } = req.body;
 
-    const sql = "INSERT INTO sales (client_name, total_price, payment_status, sale_date) VALUES (?, ?, 'Completed', NOW())";
+    try {
+        // 1. Insert the Sale
+        const saleSql = "INSERT INTO sales (client_name, total_price, payment_status, sale_date) VALUES ($1, $2, 'Completed', NOW()) RETURNING id";
+        const saleRes = await pool.query(saleSql, [clientName, amount]);
+        const saleId = saleRes.rows[0].id;
 
-    db.query(sql, [clientName, amount], (err, result) => {
-        if (err) {
-            console.error("Cash Insert Error:", err);
-            return res.status(500).json({ success: false });
-        }
+        // 2. Bulk Insert Items (Postgres Syntax)
+        // We build a query like: INSERT INTO sales_items (...) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)
+        const values = [];
+        const placeholders = items.map((item, index) => {
+            const offset = index * 4;
+            values.push(saleId, item.product_name, item.qty, item.price);
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+        }).join(",");
 
-        const saleId = result.insertId;
+        const itemSql = `INSERT INTO sales_items (sale_id, product_name, qty, price) VALUES ${placeholders}`;
+        await pool.query(itemSql, values);
 
-        const itemValues = items.map(item => [
-            saleId,
-            item.product_name,
-            item.qty,
-            item.price
-        ]);
-
-        const itemSql = `INSERT INTO sales_items (sale_id, product_name, qty, price) VALUES ?`;
-
-        db.query(itemSql, [itemValues], (itemErr) => {
-            if (itemErr) {
-                console.error("Cash Item Insert Error:", itemErr);
-                return res.status(500).json({ success: false });
-            }
-
-            res.json({ success: true });
-        });
-    });
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Cash Sale Error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // 4. CALLBACK
@@ -316,7 +306,7 @@ app.post('/api/callback', (req, res) => {
     // Logic: 0 is Success. 1037 (Timeout), 1 (Cancelled), or others = Failed
     const finalStatus = (resultCode === 0) ? 'Completed' : 'Failed';
 
-    db.query(
+    pool.query(
         "UPDATE sales SET payment_status = ? WHERE mpesa_checkout_id = ?",
         [finalStatus, checkoutID],
         (err) => {
@@ -328,11 +318,9 @@ app.post('/api/callback', (req, res) => {
     res.json("Received");
 });
 // 5. SALES REPORT
-app.get('/api/reports/sales-summary', (req, res) => {
+app.get('/api/reports/sales-summary', async (req, res) => {
     const { date } = req.query;
     const selectedDate = date || getLocalDate();
-
-    console.log("Fetching report for date:", selectedDate);
 
     const sql = `
         SELECT 
@@ -342,22 +330,19 @@ app.get('/api/reports/sales-summary', (req, res) => {
             SUM(si.qty * si.price) as total_revenue
         FROM sales_items si
         JOIN sales s ON si.sale_id = s.id
-        WHERE DATE(s.sale_date) = ?
+        WHERE s.sale_date::date = $1
         AND s.payment_status = 'Completed'
         GROUP BY si.product_name
         ORDER BY total_revenue DESC
     `;
 
-    db.query(sql, [selectedDate], (err, results) => {
-        if (err) {
-            console.error("Report Error:", err);
-            return res.status(500).json({ error: "Failed" });
-        }
-
-        res.json(results);
-    });
+    try {
+        const result = await pool.query(sql, [selectedDate]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
-
 // ================= 🔥 ADVANCED REPORTING ROUTES =================
 
 app.get('/api/reports/advanced-summary', (req, res) => {
@@ -369,7 +354,7 @@ app.get('/api/reports/advanced-summary', (req, res) => {
         ORDER BY date DESC
         LIMIT 30
     `;
-    db.query(sql, (err, results) => {
+    pool.query(sql, (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
@@ -383,7 +368,7 @@ app.get('/api/reports/payment-breakdown', (req, res) => {
         WHERE DATE(sale_date) = ?
         GROUP BY payment_status
     `;
-    db.query(sql, [date], (err, results) => {
+    pool.query(sql, [date], (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
@@ -401,7 +386,7 @@ app.get('/api/reports/top-items', (req, res) => {
         ORDER BY total_qty DESC
         LIMIT 5
     `;
-    db.query(sql, [date], (err, results) => {
+    pool.query(sql, [date], (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
@@ -417,29 +402,27 @@ app.get('/api/reports/hourly-sales', (req, res) => {
         GROUP BY hour
         ORDER BY hour
     `;
-    db.query(sql, [date], (err, results) => {
+    pool.query(sql, [date], (err, results) => {
         if (err) return res.status(500).json(err);
         res.json(results);
     });
 });
 
-app.get('/api/reports/monthly-cumulative', (req, res) => {
-    const { month } = req.query; 
+app.get('/api/reports/monthly-cumulative', async (req, res) => {
+    const { month } = req.query; // Format expected: '2026-04'
     const sql = `
         SELECT COALESCE(SUM(total_price), 0) as total_revenue 
         FROM sales 
-        WHERE DATE_FORMAT(sale_date, '%Y-%m') = ? 
+        WHERE TO_CHAR(sale_date, 'YYYY-MM') = $1 
         AND payment_status = 'Completed'
     `;
 
-    db.query(sql, [month], (err, results) => {
-        if (err) {
-            console.error("Monthly SQL Error:", err);
-            return res.status(500).json(err);
-        }
-        const total = results[0].total_revenue ? parseFloat(results[0].total_revenue) : 0;
-        res.json({ total_revenue: total });
-    });
+    try {
+        const result = await pool.query(sql, [month]);
+        res.json({ total_revenue: parseFloat(result.rows[0].total_revenue) });
+    } catch (err) {
+        res.status(500).json(err);
+    }
 });
 
 // ================= 🛒 INVENTORY & AUDIT ROUTES =================
@@ -470,7 +453,7 @@ app.get('/api/inventory', (req, res) => {
         GROUP BY i.id
     `;
 
-    db.query(sql, [formattedStart], (err, results) => {
+    pool.query(sql, [formattedStart], (err, results) => {
         if (err) return res.status(500).json(err);
         
         const inventoryWithCalculations = results.map(item => {
@@ -513,7 +496,7 @@ app.get('/api/inventory', (req, res) => {
 app.post('/api/inventory/add-stock', (req, res) => {
     const { item_id, quantity_to_add } = req.body;
     const sql = "UPDATE inventory SET stock_quantity = stock_quantity + ?, added_stock = added_stock + ? WHERE id = ?";
-    db.query(sql, [quantity_to_add, quantity_to_add, item_id], (err, result) => {
+    pool.query(sql, [quantity_to_add, quantity_to_add, item_id], (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true });
     });
@@ -522,7 +505,7 @@ app.post('/api/inventory/add-stock', (req, res) => {
 app.post('/api/inventory/add-new', (req, res) => {
     const { item_name, unit_measure, stock_quantity } = req.body;
     const sql = "INSERT INTO inventory (item_name, unit_measure, stock_quantity, opening_stock) VALUES (?, ?, ?, ?)";
-    db.query(sql, [item_name, unit_measure, stock_quantity, stock_quantity], (err, result) => {
+    pool.query(sql, [item_name, unit_measure, stock_quantity, stock_quantity], (err, result) => {
         if (err) return res.status(500).json(err);
         res.json({ success: true });
     });
@@ -543,7 +526,7 @@ app.get('/api/inventory/audit-report', (req, res) => {
         LEFT JOIN yield_rules y ON i.item_name = y.material_name
     `;
 
-    db.query(sql, (err, results) => {
+    pool.query(sql, (err, results) => {
         if (err) return res.status(500).json(err);
 
         const groupedAudit = {};
